@@ -244,6 +244,12 @@ pp.parseExprOp = function(left, leftStartPos, leftStartLoc, minPrec, noIn) {
     if (this.match(tt.plusMin) && !this.isNextCharWhitespace()) {
       return left;
     }
+    // if it's a `|` in a match/case on a newline, assume it's for the "case"
+    // TODO: consider using indentation to be more precise about this
+    // TODO: just remove all bitwise operators so this isn't necessary.
+    if (this.match(tt.bitwiseOR) && this.state.inMatchCaseConsequent) {
+      return left;
+    }
   }
 
   const prec = this.state.type.binop;
@@ -283,7 +289,12 @@ pp.parseExprOp = function(left, leftStartPos, leftStartLoc, minPrec, noIn) {
 // Parse unary operators, both prefix and postfix.
 
 pp.parseMaybeUnary = function (refShorthandDefaultPos) {
-  if (this.state.type.prefix) {
+  const matchCaseBinaryPlusMin = this.hasPlugin("lightscript") &&
+    this.state.inMatchCaseTest &&
+    this.match(tt.plusMin) &&
+    this.isNextCharWhitespace();
+
+  if (this.state.type.prefix && !matchCaseBinaryPlusMin) {
     if (this.hasPlugin("lightscript") && this.match(tt.plusMin)) {
       if (this.isNextCharWhitespace()) this.unexpected(null, "Unary +/- cannot be followed by a space in lightscript.");
     }
@@ -687,6 +698,11 @@ pp.parseExprAtom = function (refShorthandDefaultPos) {
         return this.parseIfExpression(node);
       }
 
+    case tt._match:
+      if (this.hasPlugin("lightscript")) {
+        return this.parseMatch();
+      }
+
     case tt.arrow:
       if (this.hasPlugin("lightscript")) {
         node = this.startNode();
@@ -707,6 +723,11 @@ pp.parseExprAtom = function (refShorthandDefaultPos) {
       }
 
     default:
+      if (this.hasPlugin("lightscript") && this.allowMatchCasePlaceholder()) {
+        // use the blank space as an empty value (perhaps 0-length would be better)
+        node = this.startNodeAt(this.state.lastTokEnd, this.state.lastTokEndLoc);
+        return this.finishNodeAt(node, "PlaceholderExpression", this.state.start, this.state.startLoc);
+      }
       this.unexpected();
   }
 };
