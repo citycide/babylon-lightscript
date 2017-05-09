@@ -1130,15 +1130,34 @@ pp.parseExportSpecifiers = function () {
 pp.parseImport = function (node) {
   this.eat(tt._import);
 
-  // import '...'
+  // import 'foo'
   if (this.match(tt.string)) {
     node.specifiers = [];
     node.source = this.parseExprAtom();
+
+    // import 'foo': a, { b, c, d as e }
+    if (this.hasPlugin("lightscript") && this.eat(tt.colon)) {
+      this.parseImportSpecifiers(node);
+    }
   } else {
-    node.specifiers = [];
-    this.parseImportSpecifiers(node);
-    this.expectContextual("from");
-    node.source = this.match(tt.string) ? this.parseExprAtom() : this.unexpected();
+    // import foo ...
+    if (
+      this.hasPlugin("lightscript") &&
+      this.match(tt.name) &&
+      this.lookahead().type === tt.colon
+    ) {
+      // import foo: bar
+      node.source = this.parseLiteral(this.state.value, "StringLiteral");
+      this.expect(tt.colon);
+      node.specifiers = [];
+      this.parseImportSpecifiers(node);
+    } else {
+      // import bar from 'foo'
+      node.specifiers = [];
+      this.parseImportSpecifiers(node);
+      this.expectContextual("from");
+      node.source = this.match(tt.string) ? this.parseExprAtom() : this.unexpected();
+    }
   }
   this.semicolon();
   return this.finishNode(node, "ImportDeclaration");
