@@ -4,6 +4,26 @@ import { types as tt } from "../tokenizer/types";
 import Parser from "./index";
 import { lineBreak } from "../util/whitespace";
 
+const uppers = /[A-Z\u00C0-\u00D6\u00D9-\u00DD]/g;
+const separators = /[\s\u2000-\u206F\u2E00-\u2E7F\\'!"#$%&()*+,\-./:;<=>?@[\]^_`{|}~]+/;
+
+function kebabCase (string) {
+  return string
+    .replace(uppers, (match) => " " + (match.toLowerCase() || match))
+    .trim()
+    .split(separators)
+    .join("-");
+}
+
+function camelCase (str) {
+  const words = str.split(separators);
+  return words.length
+    ? words[0] + words.slice(1).map(
+        (v) => v.charAt(0).toUpperCase() + v.slice(1)
+      ).join("")
+    : "";
+}
+
 const pp = Parser.prototype;
 
 // ### Statement parsing
@@ -1177,6 +1197,7 @@ pp.parseImport = function (node) {
 
     // import 'foo': a, { b, c, d as e }
     if (this.hasPlugin("lightscript") && this.eat(tt.colon)) {
+      node.flipped = true;
       this.parseImportSpecifiers(node);
     }
   } else {
@@ -1187,8 +1208,12 @@ pp.parseImport = function (node) {
       this.lookahead().type === tt.colon
     ) {
       // import foo: bar
-      node.source = this.parseLiteral(this.state.value, "StringLiteral");
+      const name = kebabCase(this.state.value);
+      node.source = this.parseLiteral(name, "StringLiteral");
+      this.addExtra(node.source, "raw", `"${name}"`);
+
       this.expect(tt.colon);
+      node.flipped = true;
       node.specifiers = [];
       this.parseImportSpecifiers(node);
     } else {
@@ -1196,7 +1221,9 @@ pp.parseImport = function (node) {
       node.specifiers = [];
       this.parseImportSpecifiers(node);
       this.expectContextual("from");
-      node.source = this.match(tt.string) ? this.parseExprAtom() : this.unexpected();
+      node.source = this.match(tt.string)
+        ? this.parseExprAtom()
+        : this.unexpected();
     }
   }
   this.semicolon();
@@ -1215,11 +1242,33 @@ pp.parseImportSpecifiers = function (node) {
     if (!this.eat(tt.comma)) return;
   }
 
+  if (this.match(tt.ellipsis) && this.hasPlugin("lightscript")) {
+    const startPos = this.state.start;
+    const startLoc = this.state.startLoc;
+    const specifier = this.startNode();
+    specifier.name = camelCase(node.source.value);
+    this.next()
+
+    const finished = this.finishNode(specifier, "Identifier");
+    finished.loc.identifierName = specifier.name;
+    node.specifiers.push(this.parseImportSpecifierDefault(finished, startPos, startLoc));
+    return;
+  }
+
   if (this.match(tt.star)) {
     const specifier = this.startNode();
     this.next();
-    this.expectContextual("as");
-    specifier.local = this.parseIdentifier();
+    if (node.flipped && !this.isContextual("as")) {
+      const inner = this.startNode();
+      inner.name = camelCase(node.source.value);
+      inner.loc.identifierName = inner.name;
+
+      this.next();
+      specifier.local = this.finishNode(inner, "Identifier");
+    } else {
+      this.expectContextual("as");
+      specifier.local = this.parseIdentifier();
+    }
     this.checkLVal(specifier.local, true, undefined, "import namespace specifier");
     node.specifiers.push(this.finishNode(specifier, "ImportNamespaceSpecifier"));
     return;
