@@ -1247,7 +1247,7 @@ pp.parseImportSpecifiers = function (node) {
     const startLoc = this.state.startLoc;
     const specifier = this.startNode();
     specifier.name = camelCase(node.source.value);
-    this.next()
+    this.next();
 
     const finished = this.finishNode(specifier, "Identifier");
     finished.loc.identifierName = specifier.name;
